@@ -8,7 +8,7 @@ app = FastAPI()
 
 # Load the trained model and vectorizer
 model = tf.keras.models.load_model('toxicity.h5')
-df = pd.read_csv('jigsaw-toxic-comment-classification-challenge/train.csv')
+df = pd.read_csv('jigsaw-toxic-comment-classification-challenge/train.csv/train.csv')
 MAX_FEATURES = 200000
 vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=1800, output_mode='int')
 vectorizer.adapt(df['comment_text'].values)
