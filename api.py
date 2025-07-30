@@ -6,7 +6,7 @@ from tensorflow.keras.layers import TextVectorization
 
 app = FastAPI()
 
-# Load the trained model and vectorizer
+# Load the trained model and vectorizer.
 model = tf.keras.models.load_model('toxicity.h5')
 df = pd.read_csv('jigsaw-toxic-comment-classification-challenge/train.csv/train.csv')
 MAX_FEATURES = 200000
