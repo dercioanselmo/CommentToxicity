@@ -2,12 +2,16 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import TextVectorization
+import os
+
+# Define base directory (relative to this script)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Load test data
 test_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/test.csv'))
 test_labels = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/test_labels.csv'))
 test_df = test_df.merge(test_labels, on='id')
-test_df = test_df[test_df['toxic'] != -1]  # Filter out unlabeled data
+test_df = test_df[test_df['toxic'] != -1]
 
 # Load model and vectorizer
 model = tf.keras.models.load_model(os.path.join(BASE_DIR, 'toxicity_improved.h5'))
@@ -23,6 +27,7 @@ loss, accuracy, precision, recall = model.evaluate(X_test, y_test)
 print(f'Test Loss: {loss}, Test Accuracy: {accuracy}, Test Precision: {precision}, Test Recall: {recall}')
 
 # Test specific comments
+categories = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
 sample_comments = [
     'You’re an idiot who doesn’t know anything.',
     'This is a great article, thanks for sharing!',

@@ -11,8 +11,8 @@ from tensorflow.keras.callbacks import EarlyStopping
 tf.random.set_seed(42)
 np.random.seed(42)
 
-# Define base directory
-BASE_DIR = r"C:\path\to\CommentToxicity"  # Update with your actual path
+# Define base directory (relative to this script)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Load dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
@@ -67,7 +67,7 @@ early_stopping = EarlyStopping(monitor='val_loss', patience=2, restore_best_weig
 model.fit(
     X_vectorized,
     y,
-    batch_size=32,  # Increased for GPU
+    batch_size=32,
     epochs=10,
     validation_split=0.2,
     callbacks=[early_stopping],
