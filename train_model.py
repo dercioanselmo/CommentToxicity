@@ -25,16 +25,23 @@ categories = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_
 X = df['comment_text'].values
 y = df[categories].values
 
-# Compute class weights to handle imbalance
-class_weights = class_weight.compute_class_weight('balanced', classes=np.unique(y), y=y.flatten())
-class_weight_dict = {i: class_weights[i] for i in range(len(class_weights))}
+# Compute class weights for each label (multi-label)
+class_weight_dict = {}
+for i, category in enumerate(categories):
+    # Compute weights for binary labels (0, 1) per category
+    weights = class_weight.compute_class_weight(
+        class_weight='balanced',
+        classes=np.array([0, 1]),
+        y=y[:, i]
+    )
+    class_weight_dict[i] = weights[1]  # Weight for positive class (1)
 
 # Text vectorization
-MAX_FEATURES = 50000  # Reduced for faster training
+MAX_FEATURES = 50000
 vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=500, output_mode='int')
 vectorizer.adapt(X)
 
-# Build a more complex model
+# Build model
 model = Sequential([
     Embedding(MAX_FEATURES + 1, 64),
     LSTM(64, return_sequences=True),
