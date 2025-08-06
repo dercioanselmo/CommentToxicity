@@ -12,7 +12,7 @@ tf.random.set_seed(42)
 np.random.seed(42)
 
 # Define base directory
-BASE_DIR = "/home/ubuntu/projects/CommentToxicity"
+BASE_DIR = r"C:\path\to\CommentToxicity"  # Update with your actual path
 
 # Load dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
@@ -28,7 +28,6 @@ y = df[categories].values
 # Compute class weights for each label (multi-label)
 class_weight_dict = {}
 for i, category in enumerate(categories):
-    # Compute weights for binary labels (0, 1) per category
     weights = class_weight.compute_class_weight(
         class_weight='balanced',
         classes=np.array([0, 1]),
@@ -68,7 +67,7 @@ early_stopping = EarlyStopping(monitor='val_loss', patience=2, restore_best_weig
 model.fit(
     X_vectorized,
     y,
-    batch_size=16,
+    batch_size=32,  # Increased for GPU
     epochs=10,
     validation_split=0.2,
     callbacks=[early_stopping],
