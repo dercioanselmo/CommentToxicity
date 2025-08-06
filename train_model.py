@@ -26,7 +26,7 @@ X = df['comment_text'].values
 y = df[categories].values
 
 # Compute class weights to handle imbalance
-class_weights = class_weight.compute_class_weight('balanced', classes=np.unique(y, axis=0), y=y.flatten())
+class_weights = class_weight.compute_class_weight('balanced', classes=np.unique(y), y=y.flatten())
 class_weight_dict = {i: class_weights[i] for i in range(len(class_weights))}
 
 # Text vectorization
@@ -36,11 +36,11 @@ vectorizer.adapt(X)
 
 # Build a more complex model
 model = Sequential([
-    Embedding(MAX_FEATURES + 1, 64),  # Increased embedding size
-    LSTM(64, return_sequences=True),  # Added return_sequences for stacked LSTM
-    LSTM(32),  # Second LSTM layer
+    Embedding(MAX_FEATURES + 1, 64),
+    LSTM(64, return_sequences=True),
+    LSTM(32),
     Dense(256, activation='relu'),
-    Dropout(0.3),  # Increased dropout
+    Dropout(0.3),
     Dense(128, activation='relu'),
     Dropout(0.3),
     Dense(len(categories), activation='sigmoid')
@@ -61,8 +61,8 @@ early_stopping = EarlyStopping(monitor='val_loss', patience=2, restore_best_weig
 model.fit(
     X_vectorized,
     y,
-    batch_size=16,  # Reduced for better generalization
-    epochs=10,  # Increased epochs
+    batch_size=16,
+    epochs=10,
     validation_split=0.2,
     callbacks=[early_stopping],
     class_weight=class_weight_dict
