@@ -11,8 +11,8 @@ from tensorflow.keras.callbacks import EarlyStopping
 tf.random.set_seed(42)
 np.random.seed(42)
 
-# Define base directory (relative to this script)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Define base directory
+BASE_DIR = "/home/ubuntu/projects/CommentToxicity"
 
 # Load dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
@@ -25,7 +25,7 @@ categories = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_
 X = df['comment_text'].values
 y = df[categories].values
 
-# Compute class weights for each label (multi-label)
+# Compute class weights for each label
 class_weight_dict = {}
 for i, category in enumerate(categories):
     weights = class_weight.compute_class_weight(
@@ -33,29 +33,41 @@ for i, category in enumerate(categories):
         classes=np.array([0, 1]),
         y=y[:, i]
     )
-    class_weight_dict[i] = weights[1]  # Weight for positive class (1)
+    class_weight_dict[i] = {0: weights[0], 1: weights[1] * 2}  # Boost positive class weight
 
 # Text vectorization
-MAX_FEATURES = 50000
+MAX_FEATURES = 100000  # Increased for better vocabulary coverage
 vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=500, output_mode='int')
 vectorizer.adapt(X)
 
-# Build model
+# Define focal loss for imbalanced classes
+def focal_loss(gamma=2.0, alpha=0.25):
+    def focal_loss_fn(y_true, y_pred):
+        y_true = tf.cast(y_true, tf.float32)
+        y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
+        cross_entropy = -y_true * tf.math.log(y_pred)
+        loss = alpha * y_true * tf.pow(1 - y_pred, gamma) * cross_entropy
+        return tf.reduce_mean(loss, axis=-1)
+    return focal_loss_fn
+
+# Build a more robust model
 model = Sequential([
-    Embedding(MAX_FEATURES + 1, 64),
-    LSTM(64, return_sequences=True),
-    LSTM(32),
+    Embedding(MAX_FEATURES + 1, 256),  # Larger embedding size
+    LSTM(256, return_sequences=True),  # Larger LSTM
+    LSTM(128),
+    Dense(1024, activation='relu'),
+    Dropout(0.5),
+    Dense(512, activation='relu'),
+    Dropout(0.5),
     Dense(256, activation='relu'),
-    Dropout(0.3),
-    Dense(128, activation='relu'),
-    Dropout(0.3),
+    Dropout(0.5),
     Dense(len(categories), activation='sigmoid')
 ])
 
-# Compile model with additional metrics
+# Compile model with focal loss and additional metrics
 model.compile(
-    loss='binary_crossentropy',
-    optimizer='adam',
+    loss=focal_loss(gamma=2.0, alpha=0.25),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.00005),  # Lower learning rate
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
 )
 
@@ -63,22 +75,28 @@ model.compile(
 X_vectorized = vectorizer(X)
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_loss', patience=2, restore_best_weights=True)
+early_stopping = EarlyStopping(monitor='val_recall', patience=3, restore_best_weights=True)
 model.fit(
     X_vectorized,
     y,
-    batch_size=32,
-    epochs=10,
+    batch_size=64,  # Larger batch size for GPU
+    epochs=20,  # More epochs for better learning
     validation_split=0.2,
     callbacks=[early_stopping],
     class_weight=class_weight_dict
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v3.h5'))
 
-# Test a sample comment
-sample_comment = 'You’re an idiot who doesn’t know anything.'
-sample_vectorized = vectorizer([sample_comment])
-prediction = model.predict(sample_vectorized)
-print({category: bool(prediction[0][idx] > 0.5) for idx, category in enumerate(categories)})
+# Test sample comments
+sample_comments = [
+    'You’re an idiot who doesn’t know anything.',
+    'This is a great article, thanks for sharing!',
+    'I hate you and hope you die.'
+]
+for comment in sample_comments:
+    sample_vectorized = vectorizer([comment])
+    prediction = model.predict(sample_vectorized)
+    print(f"Comment: {comment}")
+    print({category: bool(prediction[0][idx] > 0.3) for idx, category in enumerate(categories)})

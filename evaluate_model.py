@@ -4,8 +4,7 @@ import tensorflow as tf
 from tensorflow.keras.layers import TextVectorization
 import os
 
-# Define base directory (relative to this script)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = "/home/ubuntu/projects/CommentToxicity"
 
 # Load test data
 test_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/test.csv'))
@@ -14,8 +13,8 @@ test_df = test_df.merge(test_labels, on='id')
 test_df = test_df[test_df['toxic'] != -1]
 
 # Load model and vectorizer
-model = tf.keras.models.load_model(os.path.join(BASE_DIR, 'toxicity_improved.h5'))
-vectorizer = TextVectorization(max_tokens=50000, output_sequence_length=500, output_mode='int')
+model = tf.keras.models.load_model(os.path.join(BASE_DIR, 'toxicity_improved_v3.h5'))
+vectorizer = TextVectorization(max_tokens=100000, output_sequence_length=500, output_mode='int')
 vectorizer.adapt(pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/train.csv'))['comment_text'].values)
 
 # Prepare test data
@@ -27,7 +26,6 @@ loss, accuracy, precision, recall = model.evaluate(X_test, y_test)
 print(f'Test Loss: {loss}, Test Accuracy: {accuracy}, Test Precision: {precision}, Test Recall: {recall}')
 
 # Test specific comments
-categories = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
 sample_comments = [
     'You’re an idiot who doesn’t know anything.',
     'This is a great article, thanks for sharing!',
@@ -37,4 +35,4 @@ for comment in sample_comments:
     sample_vectorized = vectorizer([comment])
     prediction = model.predict(sample_vectorized)
     print(f"Comment: {comment}")
-    print({category: bool(prediction[0][idx] > 0.5) for idx, category in enumerate(categories)})
+    print({category: bool(prediction[0][idx] > 0.3) for idx, category in enumerate(categories)})
