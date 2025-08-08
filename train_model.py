@@ -12,7 +12,7 @@ tf.random.set_seed(42)
 np.random.seed(42)
 
 # Define base directory
-BASE_DIR = "/home/ubuntu/projects/CommentToxicity"
+BASE_DIR = "/home/branch/projects/CommentToxicity"
 
 # Load dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
@@ -33,15 +33,15 @@ for i, category in enumerate(categories):
         classes=np.array([0, 1]),
         y=y[:, i]
     )
-    class_weight_dict[i] = {0: weights[0], 1: weights[1] * 2}  # Boost positive class weight
+    class_weight_dict[i] = {0: weights[0], 1: weights[1] * 15}  # Boost positive class weight
 
 # Text vectorization
-MAX_FEATURES = 100000  # Increased for better vocabulary coverage
+MAX_FEATURES = 150000  # Increased for better vocabulary coverage
 vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=500, output_mode='int')
 vectorizer.adapt(X)
 
 # Define focal loss for imbalanced classes
-def focal_loss(gamma=2.0, alpha=0.25):
+def focal_loss(gamma=3.0, alpha=0.5):
     def focal_loss_fn(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
@@ -52,22 +52,22 @@ def focal_loss(gamma=2.0, alpha=0.25):
 
 # Build a more robust model
 model = Sequential([
-    Embedding(MAX_FEATURES + 1, 256),  # Larger embedding size
-    LSTM(256, return_sequences=True),  # Larger LSTM
-    LSTM(128),
+    Embedding(MAX_FEATURES + 1, 512),
+    LSTM(512, return_sequences=True),
+    LSTM(256),
+    Dense(2048, activation='relu'),
+    Dropout(0.5),
     Dense(1024, activation='relu'),
     Dropout(0.5),
     Dense(512, activation='relu'),
-    Dropout(0.5),
-    Dense(256, activation='relu'),
     Dropout(0.5),
     Dense(len(categories), activation='sigmoid')
 ])
 
 # Compile model with focal loss and additional metrics
 model.compile(
-    loss=focal_loss(gamma=2.0, alpha=0.25),
-    optimizer=tf.keras.optimizers.Adam(learning_rate=0.00005),  # Lower learning rate
+    loss=focal_loss(gamma=3.0, alpha=0.5),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.00005),
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
 )
 
@@ -79,15 +79,15 @@ early_stopping = EarlyStopping(monitor='val_recall', patience=3, restore_best_we
 model.fit(
     X_vectorized,
     y,
-    batch_size=64,  # Larger batch size for GPU
-    epochs=20,  # More epochs for better learning
+    batch_size=256,  # Larger batch size for GPU
+    epochs=20,
     validation_split=0.2,
     callbacks=[early_stopping],
     class_weight=class_weight_dict
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v3.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v12.h5'))
 
 # Test sample comments
 sample_comments = [
