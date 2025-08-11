@@ -2,7 +2,6 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow.keras.layers import TextVectorization, Embedding, LSTM, Dense, Dropout
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.regularizers import l2
 import numpy as np
 import os
 from sklearn.utils import class_weight
@@ -51,7 +50,7 @@ for i, category in enumerate(categories):
         y=y[:, i]
     )
     class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1] * 2.5  # Positive class (1), moderate multiplier
+    class_weight_dict[i * 2 + 1] = weights[1] * 3.0  # Positive class (1), stronger multiplier
 
 # Text vectorization
 MAX_FEATURES = 150000
@@ -79,7 +78,7 @@ class F1Score(tf.keras.metrics.Metric):
         self.recall.reset_state()
 
 # Custom focal loss
-def focal_loss(gamma=1.5, alpha=0.5):
+def focal_loss(gamma=2.0, alpha=0.25):
     def focal_loss_fn(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
@@ -88,21 +87,21 @@ def focal_loss(gamma=1.5, alpha=0.5):
         return tf.reduce_mean(alpha * weight * cross_entropy)
     return focal_loss_fn
 
-# Build model with light L2 regularization
+# Build model
 model = Sequential([
     Embedding(MAX_FEATURES + 1, 384),
-    LSTM(384, return_sequences=True, kernel_regularizer=l2(0.001)),
-    LSTM(192, kernel_regularizer=l2(0.001)),
-    Dense(1024, activation='relu', kernel_regularizer=l2(0.001)),
+    LSTM(384, return_sequences=True),
+    LSTM(192),
+    Dense(1024, activation='relu'),
     Dropout(0.5),
-    Dense(512, activation='relu', kernel_regularizer=l2(0.001)),
+    Dense(512, activation='relu'),
     Dropout(0.5),
     Dense(len(categories), activation='sigmoid')
 ])
 
 # Compile model
 model.compile(
-    loss=focal_loss(gamma=1.5, alpha=0.5),
+    loss=focal_loss(gamma=2.0, alpha=0.25),
     optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall(), F1Score()]
 )
@@ -111,7 +110,7 @@ model.compile(
 X_vectorized = vectorizer(X)
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_f1_score', patience=5, restore_best_weights=True, mode='max')
+early_stopping = EarlyStopping(monitor='val_f1_score', patience=7, restore_best_weights=True, mode='max')
 model.fit(
     X_vectorized,
     y,
@@ -123,7 +122,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v24.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v25.h5'))
 
 # Test sample comments
 sample_comments = [
