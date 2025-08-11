@@ -9,6 +9,12 @@ from sklearn.utils import class_weight
 from tensorflow.keras.callbacks import EarlyStopping
 import re
 import string
+from nltk.corpus import stopwords
+
+# Download stopwords
+import nltk
+nltk.download('stopwords')
+stop_words = set(stopwords.words('english'))
 
 # Set random seed for reproducibility
 tf.random.set_seed(42)
@@ -22,6 +28,7 @@ def clean_text(text):
     text = text.lower()
     text = re.sub(f'[{string.punctuation}]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
+    text = ' '.join(word for word in text.split() if word not in stop_words)
     return text
 
 # Load and preprocess dataset
@@ -45,38 +52,28 @@ for i, category in enumerate(categories):
         y=y[:, i]
     )
     class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1] * 1.5  # Positive class (1), reduced multiplier
+    class_weight_dict[i * 2 + 1] = weights[1]  # Positive class (1), no multiplier
 
 # Text vectorization
 MAX_FEATURES = 150000
 vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=500, output_mode='int')
 vectorizer.adapt(X)
 
-# Define focal loss
-def focal_loss(gamma=1.0, alpha=0.25):
-    def focal_loss_fn(y_true, y_pred):
-        y_true = tf.cast(y_true, tf.float32)
-        y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
-        cross_entropy = -y_true * tf.math.log(y_pred)
-        loss = alpha * y_true * tf.pow(1 - y_pred, gamma) * cross_entropy
-        return tf.reduce_mean(loss, axis=-1)
-    return focal_loss_fn
-
 # Build model with L2 regularization
 model = Sequential([
-    Embedding(MAX_FEATURES + 1, 384),
-    LSTM(384, return_sequences=True, kernel_regularizer=l2(0.01)),
-    LSTM(192, kernel_regularizer=l2(0.01)),
-    Dense(1024, activation='relu', kernel_regularizer=l2(0.01)),
+    Embedding(MAX_FEATURES + 1, 256),
+    LSTM(256, return_sequences=True, kernel_regularizer=l2(0.02)),
+    LSTM(128, kernel_regularizer=l2(0.02)),
+    Dense(512, activation='relu', kernel_regularizer=l2(0.02)),
     Dropout(0.5),
-    Dense(512, activation='relu', kernel_regularizer=l2(0.01)),
+    Dense(256, activation='relu', kernel_regularizer=l2(0.02)),
     Dropout(0.5),
     Dense(len(categories), activation='sigmoid')
 ])
 
 # Compile model
 model.compile(
-    loss=focal_loss(gamma=1.0, alpha=0.25),
+    loss='binary_crossentropy',
     optimizer=tf.keras.optimizers.Adam(learning_rate=0.00005),
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
 )
@@ -85,7 +82,7 @@ model.compile(
 X_vectorized = vectorizer(X)
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_precision', patience=5, restore_best_weights=True)
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 model.fit(
     X_vectorized,
     y,
@@ -97,7 +94,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v16.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v17.h5'))
 
 # Test sample comments
 sample_comments = [
