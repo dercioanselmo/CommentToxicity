@@ -25,7 +25,7 @@ def clean_text(text):
     return text
 
 # Load the trained model and vectorizer
-model = tf.keras.models.load_model(os.path.join(BASE_DIR, 'toxicity_improved_v25.h5'))
+model = tf.keras.models.load_model(os.path.join(BASE_DIR, 'toxicity_improved_v27.h5'))
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
 MAX_FEATURES = 150000

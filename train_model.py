@@ -27,10 +27,10 @@ def clean_text(text):
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
 
-# Oversample toxic comments (80% of non-toxic samples)
+# Oversample toxic comments (90% of non-toxic samples)
 toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) > 0]
 non_toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
-toxic_df_oversampled = toxic_df.sample(int(0.8 * len(non_toxic_df)), replace=True, random_state=42)
+toxic_df_oversampled = toxic_df.sample(int(0.9 * len(non_toxic_df)), replace=True, random_state=42)
 df = pd.concat([non_toxic_df, toxic_df_oversampled]).sample(frac=1, random_state=42)
 print(df.head())
 
@@ -122,7 +122,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v25.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v27.h5'))
 
 # Test sample comments
 sample_comments = [

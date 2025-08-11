@@ -23,7 +23,7 @@ test_df = test_df[test_df['toxic'] != -1]
 test_df['comment_text'] = test_df['comment_text'].apply(clean_text)
 
 # Load model and vectorizer
-model = tf.keras.models.load_model(os.path.join(BASE_DIR, 'toxicity_improved_v25.h5'))
+model = tf.keras.models.load_model(os.path.join(BASE_DIR, 'toxicity_improved_v27.h5'))
 train_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/train.csv'))
 train_df['comment_text'] = train_df['comment_text'].apply(clean_text)
 vectorizer = TextVectorization(max_tokens=150000, output_sequence_length=500, output_mode='int')
