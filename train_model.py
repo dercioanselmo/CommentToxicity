@@ -19,17 +19,20 @@ np.random.seed(42)
 BASE_DIR = "/home/branch/projects/CommentToxicity"
 
 # Text preprocessing function
-def clean_text(text):
+def clean_text(text, is_toxic=False):
     text = text.lower()
     text = re.sub(f'[{string.punctuation}]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    text = ' '.join(word for word in text.split() if word not in stop_words)
+    if not is_toxic:  # Only remove stopwords for non-toxic comments
+        text = ' '.join(word for word in text.split() if word not in stop_words)
     return text
 
 # Load and preprocess dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 stop_words = set(stopwords.words('english'))
-df['comment_text'] = df['comment_text'].apply(clean_text)
+# Apply conditional preprocessing based on toxicity
+df['is_toxic'] = df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) > 0
+df['comment_text'] = df.apply(lambda x: clean_text(x['comment_text'], x['is_toxic']), axis=1)
 print(df.head())
 
 # Define categories
@@ -48,7 +51,7 @@ for i, category in enumerate(categories):
         y=y[:, i]
     )
     class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1] * 1.2  # Positive class (1), small multiplier
+    class_weight_dict[i * 2 + 1] = weights[1] * 2.0  # Positive class (1), moderate multiplier
 
 # Text vectorization
 MAX_FEATURES = 150000
@@ -58,19 +61,19 @@ vectorizer.adapt(X)
 # Build model with L2 regularization
 model = Sequential([
     Embedding(MAX_FEATURES + 1, 256),
-    LSTM(256, return_sequences=True, kernel_regularizer=l2(0.01)),
-    LSTM(128, kernel_regularizer=l2(0.01)),
-    Dense(512, activation='relu', kernel_regularizer=l2(0.01)),
+    LSTM(256, return_sequences=True, kernel_regularizer=l2(0.005)),
+    LSTM(128, kernel_regularizer=l2(0.005)),
+    Dense(512, activation='relu', kernel_regularizer=l2(0.005)),
     Dropout(0.5),
-    Dense(256, activation='relu', kernel_regularizer=l2(0.01)),
+    Dense(256, activation='relu', kernel_regularizer=l2(0.005)),
     Dropout(0.5),
     Dense(len(categories), activation='sigmoid')
 ])
 
-# Compile model
+# Compile model with label smoothing
 model.compile(
-    loss='binary_crossentropy',
-    optimizer=tf.keras.optimizers.Adam(learning_rate=0.00005),
+    loss=tf.keras.losses.BinaryCrossentropy(label_smoothing=0.1),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
 )
 
@@ -78,7 +81,7 @@ model.compile(
 X_vectorized = vectorizer(X)
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_loss', patience=7, restore_best_weights=True)
+early_stopping = EarlyStopping(monitor='val_recall', patience=5, restore_best_weights=True)
 model.fit(
     X_vectorized,
     y,
@@ -90,7 +93,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v18.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v19.h5'))
 
 # Test sample comments
 sample_comments = [
@@ -99,7 +102,7 @@ sample_comments = [
     'I hate you and hope you die.'
 ]
 for comment in sample_comments:
-    sample_vectorized = vectorizer([clean_text(comment)])
+    sample_vectorized = vectorizer([clean_text(comment, is_toxic=True)])  # Treat as toxic for testing
     prediction = model.predict(sample_vectorized)
     print(f"Comment: {comment}")
     print({category: bool(prediction[0][idx] > 0.5) for idx, category in enumerate(categories)})
