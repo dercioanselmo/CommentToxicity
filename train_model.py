@@ -33,9 +33,8 @@ for i, category in enumerate(categories):
         classes=np.array([0, 1]),
         y=y[:, i]
     )
-    # Assign weights for each class (0 and 1) for the i-th category
     class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1] * 15  # Positive class (1), boosted
+    class_weight_dict[i * 2 + 1] = weights[1] * 5  # Positive class (1), reduced multiplier
 
 # Text vectorization
 MAX_FEATURES = 150000  # Increased for better vocabulary coverage
@@ -43,7 +42,7 @@ vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=5
 vectorizer.adapt(X)
 
 # Define focal loss for imbalanced classes
-def focal_loss(gamma=3.0, alpha=0.5):
+def focal_loss(gamma=2.0, alpha=0.25):
     def focal_loss_fn(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
@@ -68,8 +67,8 @@ model = Sequential([
 
 # Compile model with focal loss and additional metrics
 model.compile(
-    loss=focal_loss(gamma=3.0, alpha=0.5),
-    optimizer=tf.keras.optimizers.Adam(learning_rate=0.00005),
+    loss=focal_loss(gamma=2.0, alpha=0.25),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.00003),
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
 )
 
@@ -77,7 +76,7 @@ model.compile(
 X_vectorized = vectorizer(X)
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_recall', patience=3, restore_best_weights=True)
+early_stopping = EarlyStopping(monitor='val_recall', patience=5, restore_best_weights=True)
 model.fit(
     X_vectorized,
     y,
@@ -89,7 +88,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v12.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v13.h5'))
 
 # Test sample comments
 sample_comments = [
