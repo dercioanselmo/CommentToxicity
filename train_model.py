@@ -2,6 +2,7 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow.keras.layers import TextVectorization, Embedding, LSTM, Dense, Dropout
 from tensorflow.keras.models import Sequential
+from tensorflow.keras.regularizers import l2
 import numpy as np
 import os
 from sklearn.utils import class_weight
@@ -44,7 +45,7 @@ for i, category in enumerate(categories):
         y=y[:, i]
     )
     class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1] * 3  # Positive class (1), moderate multiplier
+    class_weight_dict[i * 2 + 1] = weights[1] * 1.5  # Positive class (1), reduced multiplier
 
 # Text vectorization
 MAX_FEATURES = 150000
@@ -52,7 +53,7 @@ vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=5
 vectorizer.adapt(X)
 
 # Define focal loss
-def focal_loss(gamma=1.5, alpha=0.3):
+def focal_loss(gamma=1.0, alpha=0.25):
     def focal_loss_fn(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
@@ -61,21 +62,21 @@ def focal_loss(gamma=1.5, alpha=0.3):
         return tf.reduce_mean(loss, axis=-1)
     return focal_loss_fn
 
-# Build model
+# Build model with L2 regularization
 model = Sequential([
     Embedding(MAX_FEATURES + 1, 384),
-    LSTM(384, return_sequences=True),
-    LSTM(192),
-    Dense(1024, activation='relu'),
+    LSTM(384, return_sequences=True, kernel_regularizer=l2(0.01)),
+    LSTM(192, kernel_regularizer=l2(0.01)),
+    Dense(1024, activation='relu', kernel_regularizer=l2(0.01)),
     Dropout(0.5),
-    Dense(512, activation='relu'),
+    Dense(512, activation='relu', kernel_regularizer=l2(0.01)),
     Dropout(0.5),
     Dense(len(categories), activation='sigmoid')
 ])
 
 # Compile model
 model.compile(
-    loss=focal_loss(gamma=1.5, alpha=0.3),
+    loss=focal_loss(gamma=1.0, alpha=0.25),
     optimizer=tf.keras.optimizers.Adam(learning_rate=0.00005),
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
 )
@@ -84,7 +85,7 @@ model.compile(
 X_vectorized = vectorizer(X)
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_recall', patience=5, restore_best_weights=True)
+early_stopping = EarlyStopping(monitor='val_precision', patience=5, restore_best_weights=True)
 model.fit(
     X_vectorized,
     y,
@@ -96,7 +97,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v15.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v16.h5'))
 
 # Test sample comments
 sample_comments = [
@@ -108,4 +109,4 @@ for comment in sample_comments:
     sample_vectorized = vectorizer([clean_text(comment)])
     prediction = model.predict(sample_vectorized)
     print(f"Comment: {comment}")
-    print({category: bool(prediction[0][idx] > 0.4) for idx, category in enumerate(categories)})
+    print({category: bool(prediction[0][idx] > 0.5) for idx, category in enumerate(categories)})
