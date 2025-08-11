@@ -52,9 +52,15 @@ test_df = test_df.merge(test_labels, on='id')
 test_df = test_df[test_df['toxic'] != -1]
 test_df['comment_text'] = test_df['comment_text'].apply(clean_text)
 
+# Balance test set (50% toxic)
+toxic_test = test_df[test_df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) > 0]
+non_toxic_test = test_df[test_df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
+min_size = min(len(toxic_test), len(non_toxic_test))
+test_df = pd.concat([toxic_test.sample(min_size, random_state=42), non_toxic_test.sample(min_size, random_state=42)]).sample(frac=1, random_state=42)
+
 # Load model and vectorizer
 model = tf.keras.models.load_model(
-    os.path.join(BASE_DIR, 'toxicity_improved_v27.h5'),
+    os.path.join(BASE_DIR, 'toxicity_improved_v29.h5'),
     custom_objects={'focal_loss_fn': focal_loss(gamma=2.0, alpha=0.25), 'F1Score': F1Score}
 )
 train_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/train.csv'))

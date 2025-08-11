@@ -36,7 +36,7 @@ def focal_loss(gamma=2.0, alpha=0.25):
 
 # Load the trained model and vectorizer
 model = tf.keras.models.load_model(
-    os.path.join(BASE_DIR, 'toxicity_improved_v27.h5'),
+    os.path.join(BASE_DIR, 'toxicity_improved_v29.h5'),
     custom_objects={'focal_loss_fn': focal_loss(gamma=2.0, alpha=0.25)}
 )
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))

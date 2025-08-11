@@ -2,11 +2,10 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow.keras.layers import TextVectorization, Embedding, LSTM, Dense, Dropout
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.regularizers import l2
 import numpy as np
 import os
 from sklearn.utils import class_weight
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.callbacks import EarlyStopping
 import re
 import string
 
@@ -28,10 +27,10 @@ def clean_text(text):
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
 
-# Oversample toxic comments (80% of non-toxic samples)
+# Oversample toxic comments (90% of non-toxic samples)
 toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) > 0]
 non_toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
-toxic_df_oversampled = toxic_df.sample(int(0.8 * len(non_toxic_df)), replace=True, random_state=42)
+toxic_df_oversampled = toxic_df.sample(int(0.9 * len(non_toxic_df)), replace=True, random_state=42)
 df = pd.concat([non_toxic_df, toxic_df_oversampled]).sample(frac=1, random_state=42)
 print(df.head())
 
@@ -88,14 +87,14 @@ def focal_loss(gamma=2.0, alpha=0.25):
         return tf.reduce_mean(alpha * weight * cross_entropy)
     return focal_loss_fn
 
-# Build model with minimal L2 regularization
+# Build model with LSTM dropout
 model = Sequential([
     Embedding(MAX_FEATURES + 1, 384),
-    LSTM(384, return_sequences=True, kernel_regularizer=l2(0.0001)),
-    LSTM(192, kernel_regularizer=l2(0.0001)),
-    Dense(1024, activation='relu', kernel_regularizer=l2(0.0001)),
+    LSTM(384, return_sequences=True, dropout=0.6),
+    LSTM(192, dropout=0.6),
+    Dense(1024, activation='relu'),
     Dropout(0.5),
-    Dense(512, activation='relu', kernel_regularizer=l2(0.0001)),
+    Dense(512, activation='relu'),
     Dropout(0.5),
     Dense(len(categories), activation='sigmoid')
 ])
@@ -110,21 +109,20 @@ model.compile(
 # Vectorize input data
 X_vectorized = vectorizer(X)
 
-# Train model with early stopping and learning rate scheduler
+# Train model with early stopping
 early_stopping = EarlyStopping(monitor='val_f1_score', patience=10, restore_best_weights=True, mode='max')
-lr_scheduler = ReduceLROnPlateau(monitor='val_f1_score', factor=0.5, patience=5, min_lr=1e-6, mode='max')
 model.fit(
     X_vectorized,
     y,
     batch_size=128,
     epochs=20,
     validation_split=0.2,
-    callbacks=[early_stopping, lr_scheduler],
+    callbacks=[early_stopping],
     class_weight=class_weight_dict
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v28.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v29.h5'))
 
 # Test sample comments
 sample_comments = [
