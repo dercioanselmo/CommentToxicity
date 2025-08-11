@@ -2,6 +2,7 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow.keras.layers import TextVectorization, Embedding, LSTM, Dense, Dropout
 from tensorflow.keras.models import Sequential
+from tensorflow.keras.regularizers import l2
 import numpy as np
 import os
 from sklearn.utils import class_weight
@@ -27,10 +28,10 @@ def clean_text(text):
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
 
-# Oversample toxic comments
+# Oversample toxic comments (50% of non-toxic samples)
 toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) > 0]
 non_toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
-toxic_df_oversampled = toxic_df.sample(len(non_toxic_df), replace=True, random_state=42)
+toxic_df_oversampled = toxic_df.sample(int(0.5 * len(non_toxic_df)), replace=True, random_state=42)
 df = pd.concat([non_toxic_df, toxic_df_oversampled]).sample(frac=1, random_state=42)
 print(df.head())
 
@@ -50,7 +51,7 @@ for i, category in enumerate(categories):
         y=y[:, i]
     )
     class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1] * 3.0  # Positive class (1), stronger multiplier
+    class_weight_dict[i * 2 + 1] = weights[1] * 2.0  # Positive class (1), moderate multiplier
 
 # Text vectorization
 MAX_FEATURES = 150000
@@ -73,18 +74,18 @@ class F1Score(tf.keras.metrics.Metric):
         r = self.recall.result()
         return 2 * ((p * r) / (p + r + tf.keras.backend.epsilon()))
 
-    def reset_states(self):
-        self.precision.reset_states()
-        self.recall.reset_states()
+    def reset_state(self):
+        self.precision.reset_state()
+        self.recall.reset_state()
 
-# Build model
+# Build model with light L2 regularization
 model = Sequential([
     Embedding(MAX_FEATURES + 1, 384),
-    LSTM(384, return_sequences=True),
-    LSTM(192),
-    Dense(1024, activation='relu'),
+    LSTM(384, return_sequences=True, kernel_regularizer=l2(0.001)),
+    LSTM(192, kernel_regularizer=l2(0.001)),
+    Dense(1024, activation='relu', kernel_regularizer=l2(0.001)),
     Dropout(0.5),
-    Dense(512, activation='relu'),
+    Dense(512, activation='relu', kernel_regularizer=l2(0.001)),
     Dropout(0.5),
     Dense(len(categories), activation='sigmoid')
 ])
@@ -100,7 +101,7 @@ model.compile(
 X_vectorized = vectorizer(X)
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_f1_score', patience=5, restore_best_weights=True, mode='max')
+early_stopping = EarlyStopping(monitor='val_f1_score', patience=7, restore_best_weights=True, mode='max')
 model.fit(
     X_vectorized,
     y,
@@ -112,7 +113,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v20.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v21.h5'))
 
 # Test sample comments
 sample_comments = [
@@ -124,4 +125,4 @@ for comment in sample_comments:
     sample_vectorized = vectorizer([clean_text(comment)])
     prediction = model.predict(sample_vectorized)
     print(f"Comment: {comment}")
-    print({category: bool(prediction[0][idx] > 0.4) for idx, category in enumerate(categories)})
+    print({category: bool(prediction[0][idx] > 0.5) for idx, category in enumerate(categories)})
