@@ -18,9 +18,9 @@ BASE_DIR = "/home/branch/projects/CommentToxicity"
 
 # Text preprocessing function
 def clean_text(text):
-    text = text.lower()  # Lowercase
-    text = re.sub(f'[{string.punctuation}]', ' ', text)  # Remove punctuation
-    text = re.sub(r'\s+', ' ', text).strip()  # Remove extra whitespace
+    text = text.lower()
+    text = re.sub(f'[{string.punctuation}]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
     return text
 
 # Load and preprocess dataset
@@ -44,29 +44,39 @@ for i, category in enumerate(categories):
         y=y[:, i]
     )
     class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1]  # Positive class (1), no multiplier
+    class_weight_dict[i * 2 + 1] = weights[1] * 3  # Positive class (1), moderate multiplier
 
 # Text vectorization
 MAX_FEATURES = 150000
 vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=500, output_mode='int')
 vectorizer.adapt(X)
 
-# Build a simpler model
+# Define focal loss
+def focal_loss(gamma=1.5, alpha=0.3):
+    def focal_loss_fn(y_true, y_pred):
+        y_true = tf.cast(y_true, tf.float32)
+        y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
+        cross_entropy = -y_true * tf.math.log(y_pred)
+        loss = alpha * y_true * tf.pow(1 - y_pred, gamma) * cross_entropy
+        return tf.reduce_mean(loss, axis=-1)
+    return focal_loss_fn
+
+# Build model
 model = Sequential([
-    Embedding(MAX_FEATURES + 1, 256),  # Reduced embedding size
-    LSTM(256, return_sequences=True),
-    LSTM(128),  # Reduced LSTM units
-    Dense(512, activation='relu'),  # Reduced dense layer size
+    Embedding(MAX_FEATURES + 1, 384),
+    LSTM(384, return_sequences=True),
+    LSTM(192),
+    Dense(1024, activation='relu'),
     Dropout(0.5),
-    Dense(256, activation='relu'),
+    Dense(512, activation='relu'),
     Dropout(0.5),
     Dense(len(categories), activation='sigmoid')
 ])
 
-# Compile model with binary cross-entropy
+# Compile model
 model.compile(
-    loss='binary_crossentropy',
-    optimizer=tf.keras.optimizers.Adam(learning_rate=0.00003),
+    loss=focal_loss(gamma=1.5, alpha=0.3),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.00005),
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
 )
 
@@ -86,7 +96,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v14.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v15.h5'))
 
 # Test sample comments
 sample_comments = [
@@ -98,4 +108,4 @@ for comment in sample_comments:
     sample_vectorized = vectorizer([clean_text(comment)])
     prediction = model.predict(sample_vectorized)
     print(f"Comment: {comment}")
-    print({category: bool(prediction[0][idx] > 0.5) for idx, category in enumerate(categories)})
+    print({category: bool(prediction[0][idx] > 0.4) for idx, category in enumerate(categories)})
