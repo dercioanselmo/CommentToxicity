@@ -33,7 +33,9 @@ for i, category in enumerate(categories):
         classes=np.array([0, 1]),
         y=y[:, i]
     )
-    class_weight_dict[i] = {0: weights[0], 1: weights[1] * 15}  # Boost positive class weight
+    # Assign weights for each class (0 and 1) for the i-th category
+    class_weight_dict[i * 2] = weights[0]  # Negative class (0)
+    class_weight_dict[i * 2 + 1] = weights[1] * 15  # Positive class (1), boosted
 
 # Text vectorization
 MAX_FEATURES = 150000  # Increased for better vocabulary coverage
