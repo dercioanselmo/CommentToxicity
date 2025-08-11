@@ -11,11 +11,6 @@ import re
 import string
 from nltk.corpus import stopwords
 
-# Download stopwords
-import nltk
-nltk.download('stopwords')
-stop_words = set(stopwords.words('english'))
-
 # Set random seed for reproducibility
 tf.random.set_seed(42)
 np.random.seed(42)
@@ -33,6 +28,7 @@ def clean_text(text):
 
 # Load and preprocess dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
+stop_words = set(stopwords.words('english'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
 print(df.head())
 
@@ -52,7 +48,7 @@ for i, category in enumerate(categories):
         y=y[:, i]
     )
     class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1]  # Positive class (1), no multiplier
+    class_weight_dict[i * 2 + 1] = weights[1] * 1.2  # Positive class (1), small multiplier
 
 # Text vectorization
 MAX_FEATURES = 150000
@@ -62,11 +58,11 @@ vectorizer.adapt(X)
 # Build model with L2 regularization
 model = Sequential([
     Embedding(MAX_FEATURES + 1, 256),
-    LSTM(256, return_sequences=True, kernel_regularizer=l2(0.02)),
-    LSTM(128, kernel_regularizer=l2(0.02)),
-    Dense(512, activation='relu', kernel_regularizer=l2(0.02)),
+    LSTM(256, return_sequences=True, kernel_regularizer=l2(0.01)),
+    LSTM(128, kernel_regularizer=l2(0.01)),
+    Dense(512, activation='relu', kernel_regularizer=l2(0.01)),
     Dropout(0.5),
-    Dense(256, activation='relu', kernel_regularizer=l2(0.02)),
+    Dense(256, activation='relu', kernel_regularizer=l2(0.01)),
     Dropout(0.5),
     Dense(len(categories), activation='sigmoid')
 ])
@@ -82,7 +78,7 @@ model.compile(
 X_vectorized = vectorizer(X)
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+early_stopping = EarlyStopping(monitor='val_loss', patience=7, restore_best_weights=True)
 model.fit(
     X_vectorized,
     y,
@@ -94,7 +90,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v17.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v18.h5'))
 
 # Test sample comments
 sample_comments = [
