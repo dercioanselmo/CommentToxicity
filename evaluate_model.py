@@ -15,6 +15,36 @@ def clean_text(text):
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
+# Custom F1 score metric
+class F1Score(tf.keras.metrics.Metric):
+    def __init__(self, name='f1_score', **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.precision = tf.keras.metrics.Precision()
+        self.recall = tf.keras.metrics.Recall()
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        self.precision.update_state(y_true, y_pred, sample_weight)
+        self.recall.update_state(y_true, y_pred, sample_weight)
+
+    def result(self):
+        p = self.precision.result()
+        r = self.recall.result()
+        return 2 * ((p * r) / (p + r + tf.keras.backend.epsilon()))
+
+    def reset_state(self):
+        self.precision.reset_state()
+        self.recall.reset_state()
+
+# Custom focal loss
+def focal_loss(gamma=2.0, alpha=0.25):
+    def focal_loss_fn(y_true, y_pred):
+        y_true = tf.cast(y_true, tf.float32)
+        y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
+        cross_entropy = -y_true * tf.math.log(y_pred) - (1 - y_true) * tf.math.log(1 - y_pred)
+        weight = y_true * tf.pow(1 - y_pred, gamma) + (1 - y_true) * tf.pow(y_pred, gamma)
+        return tf.reduce_mean(alpha * weight * cross_entropy)
+    return focal_loss_fn
+
 # Load test data
 test_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/test.csv'))
 test_labels = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/test_labels.csv'))
@@ -23,7 +53,10 @@ test_df = test_df[test_df['toxic'] != -1]
 test_df['comment_text'] = test_df['comment_text'].apply(clean_text)
 
 # Load model and vectorizer
-model = tf.keras.models.load_model(os.path.join(BASE_DIR, 'toxicity_improved_v27.h5'))
+model = tf.keras.models.load_model(
+    os.path.join(BASE_DIR, 'toxicity_improved_v27.h5'),
+    custom_objects={'focal_loss_fn': focal_loss(gamma=2.0, alpha=0.25), 'F1Score': F1Score}
+)
 train_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/train.csv'))
 train_df['comment_text'] = train_df['comment_text'].apply(clean_text)
 vectorizer = TextVectorization(max_tokens=150000, output_sequence_length=500, output_mode='int')
