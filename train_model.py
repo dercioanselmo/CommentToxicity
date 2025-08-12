@@ -50,7 +50,7 @@ for i, category in enumerate(categories):
         y=y[:, i]
     )
     class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1] * 3.0  # Positive class (1)
+    class_weight_dict[i * 2 + 1] = weights[1] * 3.5  # Positive class (1)
 
 # Text vectorization
 MAX_FEATURES = 150000
@@ -78,7 +78,7 @@ class F1Score(tf.keras.metrics.Metric):
         self.recall.reset_state()
 
 # Custom focal loss
-def focal_loss(gamma=2.0, alpha=0.25):
+def focal_loss(gamma=1.5, alpha=0.5):
     def focal_loss_fn(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
@@ -87,11 +87,11 @@ def focal_loss(gamma=2.0, alpha=0.25):
         return tf.reduce_mean(alpha * weight * cross_entropy)
     return focal_loss_fn
 
-# Build model with LSTM dropout
+# Build model with adjusted LSTM dropout
 model = Sequential([
     Embedding(MAX_FEATURES + 1, 384),
-    LSTM(384, return_sequences=True, dropout=0.6),
-    LSTM(192, dropout=0.6),
+    LSTM(384, return_sequences=True, dropout=0.3),
+    LSTM(192, dropout=0.3),
     Dense(1024, activation='relu'),
     Dropout(0.5),
     Dense(512, activation='relu'),
@@ -101,7 +101,7 @@ model = Sequential([
 
 # Compile model
 model.compile(
-    loss=focal_loss(gamma=2.0, alpha=0.25),
+    loss=focal_loss(gamma=1.5, alpha=0.5),
     optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall(), F1Score()]
 )
@@ -110,19 +110,19 @@ model.compile(
 X_vectorized = vectorizer(X)
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_f1_score', patience=10, restore_best_weights=True, mode='max')
+early_stopping = EarlyStopping(monitor='val_f1_score', patience=5, restore_best_weights=True, mode='max')
 model.fit(
     X_vectorized,
     y,
     batch_size=128,
-    epochs=20,
+    epochs=30,
     validation_split=0.2,
     callbacks=[early_stopping],
     class_weight=class_weight_dict
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v29.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v30.h5'))
 
 # Test sample comments
 sample_comments = [
