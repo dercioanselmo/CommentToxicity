@@ -25,7 +25,7 @@ def clean_text(text):
     return text
 
 # Custom focal loss
-def focal_loss(gamma=1.5, alpha=0.5):
+def focal_loss(gamma=2.0, alpha=0.25):
     def focal_loss_fn(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
@@ -36,8 +36,8 @@ def focal_loss(gamma=1.5, alpha=0.5):
 
 # Load the trained model and vectorizer
 model = tf.keras.models.load_model(
-    os.path.join(BASE_DIR, 'toxicity_improved_v30.h5'),
-    custom_objects={'focal_loss_fn': focal_loss(gamma=1.5, alpha=0.5)}
+    os.path.join(BASE_DIR, 'toxicity_improved_v31.h5'),
+    custom_objects={'focal_loss_fn': focal_loss(gamma=2.0, alpha=0.25)}
 )
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)

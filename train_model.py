@@ -8,10 +8,12 @@ from sklearn.utils import class_weight
 from tensorflow.keras.callbacks import EarlyStopping
 import re
 import string
+import random
 
 # Set random seed for reproducibility
 tf.random.set_seed(42)
 np.random.seed(42)
+random.seed(42)
 
 # Define base directory
 BASE_DIR = "/home/branch/projects/CommentToxicity"
@@ -23,14 +25,25 @@ def clean_text(text):
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
+# Simple text augmentation for toxic comments
+def augment_text(text):
+    words = text.split()
+    if len(words) > 3:
+        idx = random.randint(0, len(words) - 1)
+        synonyms = ['stupid', 'dumb', 'idiot', 'moron', 'fool'] if 'idiot' in words[idx].lower() else ['bad', 'awful', 'terrible', 'horrible']
+        if synonyms and random.random() < 0.3:
+            words[idx] = random.choice(synonyms)
+    return ' '.join(words)
+
 # Load and preprocess dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
 
-# Oversample toxic comments (90% of non-toxic samples)
+# Oversample toxic comments (90% of non-toxic samples) with augmentation
 toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) > 0]
 non_toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
 toxic_df_oversampled = toxic_df.sample(int(0.9 * len(non_toxic_df)), replace=True, random_state=42)
+toxic_df_oversampled['comment_text'] = toxic_df_oversampled['comment_text'].apply(augment_text)
 df = pd.concat([non_toxic_df, toxic_df_oversampled]).sample(frac=1, random_state=42)
 print(df.head())
 
@@ -50,7 +63,7 @@ for i, category in enumerate(categories):
         y=y[:, i]
     )
     class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1] * 3.5  # Positive class (1)
+    class_weight_dict[i * 2 + 1] = weights[1] * 3.0  # Positive class (1)
 
 # Text vectorization
 MAX_FEATURES = 150000
@@ -78,7 +91,7 @@ class F1Score(tf.keras.metrics.Metric):
         self.recall.reset_state()
 
 # Custom focal loss
-def focal_loss(gamma=1.5, alpha=0.5):
+def focal_loss(gamma=2.0, alpha=0.25):
     def focal_loss_fn(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
@@ -87,11 +100,11 @@ def focal_loss(gamma=1.5, alpha=0.5):
         return tf.reduce_mean(alpha * weight * cross_entropy)
     return focal_loss_fn
 
-# Build model with adjusted LSTM dropout
+# Build model with increased LSTM units and adjusted dropout
 model = Sequential([
     Embedding(MAX_FEATURES + 1, 384),
-    LSTM(384, return_sequences=True, dropout=0.3),
-    LSTM(192, dropout=0.3),
+    LSTM(512, return_sequences=True, dropout=0.4),
+    LSTM(256, dropout=0.4),
     Dense(1024, activation='relu'),
     Dropout(0.5),
     Dense(512, activation='relu'),
@@ -101,7 +114,7 @@ model = Sequential([
 
 # Compile model
 model.compile(
-    loss=focal_loss(gamma=1.5, alpha=0.5),
+    loss=focal_loss(gamma=2.0, alpha=0.25),
     optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall(), F1Score()]
 )
@@ -110,7 +123,7 @@ model.compile(
 X_vectorized = vectorizer(X)
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_f1_score', patience=5, restore_best_weights=True, mode='max')
+early_stopping = EarlyStopping(monitor='val_recall', patience=5, restore_best_weights=True, mode='max')
 model.fit(
     X_vectorized,
     y,
@@ -122,7 +135,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v30.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v31.h5'))
 
 # Test sample comments
 sample_comments = [
