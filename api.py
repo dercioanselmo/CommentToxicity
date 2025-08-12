@@ -36,7 +36,7 @@ def focal_loss(gamma=2.0, alpha=0.25):
 
 # Load the trained model and vectorizer
 model = tf.keras.models.load_model(
-    os.path.join(BASE_DIR, 'toxicity_improved_v31.h5'),
+    os.path.join(BASE_DIR, 'toxicity_improved_v32.h5'),
     custom_objects={'focal_loss_fn': focal_loss(gamma=2.0, alpha=0.25)}
 )
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
@@ -54,6 +54,6 @@ async def predict_toxicity(comment: str):
     vectorized_comment = vectorizer([clean_text(comment)])
     results = model.predict(vectorized_comment)
     logger.info(f"Raw predictions: {results[0].tolist()}")
-    response = {category: bool(results[0][idx] > 0.5) for idx, category in enumerate(categories)}
+    response = {category: bool(results[0][idx] > 0.45) for idx, category in enumerate(categories)}
     logger.info(f"Response: {response}")
     return response
