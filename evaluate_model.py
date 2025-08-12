@@ -36,7 +36,7 @@ class F1Score(tf.keras.metrics.Metric):
         self.recall.reset_state()
 
 # Custom focal loss
-def focal_loss(gamma=2.0, alpha=0.25):
+def focal_loss(gamma=1.5, alpha=0.5):
     def focal_loss_fn(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
@@ -60,8 +60,8 @@ test_df = pd.concat([toxic_test.sample(min_size, random_state=42), non_toxic_tes
 
 # Load model and vectorizer
 model = tf.keras.models.load_model(
-    os.path.join(BASE_DIR, 'toxicity_improved_v29.h5'),
-    custom_objects={'focal_loss_fn': focal_loss(gamma=2.0, alpha=0.25), 'F1Score': F1Score}
+    os.path.join(BASE_DIR, 'toxicity_improved_v30.h5'),
+    custom_objects={'focal_loss_fn': focal_loss(gamma=1.5, alpha=0.5), 'F1Score': F1Score}
 )
 train_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/train.csv'))
 train_df['comment_text'] = train_df['comment_text'].apply(clean_text)
