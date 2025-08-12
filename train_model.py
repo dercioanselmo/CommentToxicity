@@ -8,12 +8,11 @@ from sklearn.utils import class_weight
 from tensorflow.keras.callbacks import EarlyStopping
 import re
 import string
-import random
+from transformers import pipeline
 
 # Set random seed for reproducibility
 tf.random.set_seed(42)
 np.random.seed(42)
-random.seed(42)
 
 # Define base directory
 BASE_DIR = "/home/branch/projects/CommentToxicity"
@@ -25,30 +24,34 @@ def clean_text(text):
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
-# Simple text augmentation for toxic comments
+# Back-translation augmentation for toxic comments
+translator_en_to_es = pipeline("translation", model="Helsinki-NLP/opus-mt-en-es")
+translator_es_to_en = pipeline("translation", model="Helsinki-NLP/opus-mt-es-en")
+
 def augment_text(text):
-    words = text.split()
-    if len(words) > 3:
-        idx = random.randint(0, len(words) - 1)
-        synonyms = ['stupid', 'dumb', 'idiot', 'moron', 'fool'] if 'idiot' in words[idx].lower() else ['bad', 'awful', 'terrible', 'horrible']
-        if synonyms and random.random() < 0.3:
-            words[idx] = random.choice(synonyms)
-    return ' '.join(words)
+    try:
+        # Translate English to Spanish and back to English
+        es_text = translator_en_to_es(text)[0]['translation_text']
+        back_translated = translator_es_to_en(es_text)[0]['translation_text']
+        return clean_text(back_translated)
+    except:
+        return text  # Fallback to original text if translation fails
 
 # Load and preprocess dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
 
-# Oversample toxic comments (90% of non-toxic samples) with augmentation
-toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) > 0]
+# Oversample each toxic label separately (90% of non-toxic samples)
 non_toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
-toxic_df_oversampled = toxic_df.sample(int(0.9 * len(non_toxic_df)), replace=True, random_state=42)
-toxic_df_oversampled['comment_text'] = toxic_df_oversampled['comment_text'].apply(augment_text)
-df = pd.concat([non_toxic_df, toxic_df_oversampled]).sample(frac=1, random_state=42)
-print(df.head())
-
-# Define categories
 categories = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
+oversampled_dfs = [non_toxic_df]
+for category in categories:
+    toxic_df = df[df[category] == 1]
+    oversampled = toxic_df.sample(int(0.9 * len(non_toxic_df)), replace=True, random_state=42)
+    oversampled['comment_text'] = oversampled['comment_text'].apply(augment_text)
+    oversampled_dfs.append(oversampled)
+df = pd.concat(oversampled_dfs).sample(frac=1, random_state=42)
+print(df.head())
 
 # Prepare data
 X = df['comment_text'].values
@@ -63,7 +66,7 @@ for i, category in enumerate(categories):
         y=y[:, i]
     )
     class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1] * 3.0  # Positive class (1)
+    class_weight_dict[i * 2 + 1] = weights[1] * 2.5  # Positive class (1)
 
 # Text vectorization
 MAX_FEATURES = 150000
@@ -90,7 +93,7 @@ class F1Score(tf.keras.metrics.Metric):
         self.precision.reset_state()
         self.recall.reset_state()
 
-# Custom focal loss
+# Custom focal loss with label-specific weights
 def focal_loss(gamma=2.0, alpha=0.25):
     def focal_loss_fn(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
@@ -100,11 +103,12 @@ def focal_loss(gamma=2.0, alpha=0.25):
         return tf.reduce_mean(alpha * weight * cross_entropy)
     return focal_loss_fn
 
-# Build model with increased LSTM units and adjusted dropout
+# Build model with reverted LSTM units and added embedding dropout
 model = Sequential([
     Embedding(MAX_FEATURES + 1, 384),
-    LSTM(512, return_sequences=True, dropout=0.4),
-    LSTM(256, dropout=0.4),
+    Dropout(0.3),
+    LSTM(384, return_sequences=True, dropout=0.4),
+    LSTM(192, dropout=0.4),
     Dense(1024, activation='relu'),
     Dropout(0.5),
     Dense(512, activation='relu'),
@@ -123,7 +127,7 @@ model.compile(
 X_vectorized = vectorizer(X)
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_recall', patience=5, restore_best_weights=True, mode='max')
+early_stopping = EarlyStopping(monitor='val_f1_score', patience=3, restore_best_weights=True, mode='max')
 model.fit(
     X_vectorized,
     y,
@@ -135,9 +139,9 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v31.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v32.h5'))
 
-# Test sample comments
+# Test sample comments with lower threshold
 sample_comments = [
     'You’re an idiot who doesn’t know anything.',
     'This is a great article, thanks for sharing!',
@@ -147,4 +151,4 @@ for comment in sample_comments:
     sample_vectorized = vectorizer([clean_text(comment)])
     prediction = model.predict(sample_vectorized)
     print(f"Comment: {comment}")
-    print({category: bool(prediction[0][idx] > 0.5) for idx, category in enumerate(categories)})
+    print({category: bool(prediction[0][idx] > 0.45) for idx, category in enumerate(categories)})
