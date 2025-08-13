@@ -22,19 +22,21 @@ def clean_text(text):
     text = text.lower()
     text = re.sub(f'[{string.punctuation}]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    # Truncate to 500 tokens (approximated by words for simplicity)
+    words = text.split()[:500]
+    return ' '.join(words)
 
 # Back-translation augmentation for toxic comments
-translator_en_to_es = pipeline("translation", model="Helsinki-NLP/opus-mt-en-es")
-translator_es_to_en = pipeline("translation", model="Helsinki-NLP/opus-mt-es-en")
+translator_en_to_es = pipeline("translation", model="Helsinki-NLP/opus-mt-en-es", device=0)
+translator_es_to_en = pipeline("translation", model="Helsinki-NLP/opus-mt-es-en", device=0)
 
 def augment_text(text):
     try:
-        # Translate English to Spanish and back to English
-        es_text = translator_en_to_es(text)[0]['translation_text']
-        back_translated = translator_es_to_en(es_text)[0]['translation_text']
+        es_text = translator_en_to_es(text, max_length=600, truncation=True)[0]['translation_text']
+        back_translated = translator_es_to_en(es_text, max_length=600, truncation=True)[0]['translation_text']
         return clean_text(back_translated)
-    except:
+    except Exception as e:
+        print(f"Translation error: {e}")
         return text  # Fallback to original text if translation fails
 
 # Load and preprocess dataset
@@ -93,7 +95,7 @@ class F1Score(tf.keras.metrics.Metric):
         self.precision.reset_state()
         self.recall.reset_state()
 
-# Custom focal loss with label-specific weights
+# Custom focal loss
 def focal_loss(gamma=2.0, alpha=0.25):
     def focal_loss_fn(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
@@ -103,7 +105,7 @@ def focal_loss(gamma=2.0, alpha=0.25):
         return tf.reduce_mean(alpha * weight * cross_entropy)
     return focal_loss_fn
 
-# Build model with reverted LSTM units and added embedding dropout
+# Build model
 model = Sequential([
     Embedding(MAX_FEATURES + 1, 384),
     Dropout(0.3),
@@ -151,5 +153,4 @@ for comment in sample_comments:
     sample_vectorized = vectorizer([clean_text(comment)])
     prediction = model.predict(sample_vectorized)
     print(f"Comment: {comment}")
-    
     print({category: bool(prediction[0][idx] > 0.45) for idx, category in enumerate(categories)})
