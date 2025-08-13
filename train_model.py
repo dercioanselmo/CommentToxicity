@@ -8,7 +8,11 @@ from sklearn.utils import class_weight
 from tensorflow.keras.callbacks import EarlyStopping
 import re
 import string
-from transformers import pipeline
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, filename='training_errors.log', filemode='w')
+logger = logging.getLogger(__name__)
 
 # Set random seed for reproducibility
 tf.random.set_seed(42)
@@ -19,29 +23,24 @@ BASE_DIR = "/home/branch/projects/CommentToxicity"
 
 # Text preprocessing function
 def clean_text(text):
+    if not isinstance(text, str) or not text.strip():
+        logger.warning("Empty or invalid comment skipped in preprocessing")
+        return ""
     text = text.lower()
     text = re.sub(f'[{string.punctuation}]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    # Truncate to 500 tokens (approximated by words for simplicity)
+    # Truncate to 500 tokens (approximated by words)
     words = text.split()[:500]
     return ' '.join(words)
 
-# Back-translation augmentation for toxic comments
-translator_en_to_es = pipeline("translation", model="Helsinki-NLP/opus-mt-en-es", device=0)
-translator_es_to_en = pipeline("translation", model="Helsinki-NLP/opus-mt-es-en", device=0)
-
+# Temporary no-op augmentation (to be restored later)
 def augment_text(text):
-    try:
-        es_text = translator_en_to_es(text, max_length=600, truncation=True)[0]['translation_text']
-        back_translated = translator_es_to_en(es_text, max_length=600, truncation=True)[0]['translation_text']
-        return clean_text(back_translated)
-    except Exception as e:
-        print(f"Translation error: {e}")
-        return text  # Fallback to original text if translation fails
+    return text  # Skip augmentation to bypass CUDA errors
 
 # Load and preprocess dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
+df = df[df['comment_text'] != ""]  # Remove empty comments
 
 # Oversample each toxic label separately (90% of non-toxic samples)
 non_toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
