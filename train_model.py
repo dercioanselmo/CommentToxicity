@@ -28,15 +28,13 @@ def clean_text(text):
         logger.warning("Empty or invalid comment skipped in preprocessing")
         return ""
     text = text.lower()
-    # Remove non-printable characters and excessive whitespace
-    text = re.sub(r'[^\x20-\x7E]', ' ', text)
+    text = re.sub(r'[^\x20-\x7E]', ' ', text)  # Remove non-printable characters
     text = re.sub(f'[{string.punctuation}]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    # Truncate to 400 tokens (words, conservative for translation models)
     words = text.split()[:400]
     return ' '.join(words)
 
-# Back-translation augmentation
+# Back-translation augmentation with batch processing
 try:
     translator_en_to_es = pipeline("translation", model="Helsinki-NLP/opus-mt-en-es", device=0)
     translator_es_to_en = pipeline("translation", model="Helsinki-NLP/opus-mt-es-en", device=0)
@@ -45,17 +43,22 @@ except Exception as e:
     translator_en_to_es = None
     translator_es_to_en = None
 
-def augment_text(text):
-    if not text.strip() or len(text.split()) > 400 or translator_en_to_es is None or translator_es_to_en is None:
-        logger.warning(f"Skipping augmentation for comment '{text[:50]}...' due to empty input, length, or pipeline failure")
-        return text
+def augment_text_batch(texts):
+    if not texts or translator_en_to_es is None or translator_es_to_en is None:
+        logger.warning("Skipping augmentation due to empty input or pipeline failure")
+        return texts
     try:
-        es_text = translator_en_to_es(text, max_length=512, truncation=True)[0]['translation_text']
-        back_translated = translator_es_to_en(es_text, max_length=512, truncation=True)[0]['translation_text']
-        return clean_text(back_translated)
+        # Translate to Spanish
+        es_texts = translator_en_to_es(texts, max_length=512, truncation=True)
+        es_texts = [result['translation_text'] for result in es_texts]
+        # Translate back to English
+        back_translated = translator_es_to_en(es_texts, max_length=512, truncation=True)
+        back_translated = [result['translation_text'] for result in back_translated]
+        # Clean translated texts
+        return [clean_text(text) for text in back_translated]
     except Exception as e:
-        logger.error(f"Translation error for comment '{text[:50]}...': {str(e)}")
-        return text
+        logger.error(f"Batch translation error for texts: {str([text[:50] for text in texts[:5]])}...: {str(e)}")
+        return texts  # Return original texts if translation fails
 
 # Load and preprocess dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
@@ -63,14 +66,20 @@ df['comment_text'] = df['comment_text'].apply(clean_text)
 df = df[df['comment_text'] != ""]  # Remove empty comments
 df = df.head(100)  # Test on small subset to debug CUDA errors
 
-# Oversample each toxic label (100% of non-toxic samples for balance)
+# Oversample each toxic label (100% of non-toxic samples)
 non_toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
 categories = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
 oversampled_dfs = [non_toxic_df]
 for category in categories:
     toxic_df = df[df[category] == 1]
     oversampled = toxic_df.sample(len(non_toxic_df), replace=True, random_state=42)
-    oversampled['comment_text'] = oversampled['comment_text'].apply(augment_text)
+    # Batch process augmentation
+    batch_size = 16
+    augmented_texts = []
+    for i in range(0, len(oversampled), batch_size):
+        batch = oversampled['comment_text'].iloc[i:i + batch_size].tolist()
+        augmented_texts.extend(augment_text_batch(batch))
+    oversampled['comment_text'] = augmented_texts
     oversampled_dfs.append(oversampled)
 df = pd.concat(oversampled_dfs).sample(frac=1, random_state=42)
 print(df.head())
