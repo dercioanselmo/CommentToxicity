@@ -103,6 +103,8 @@ MAX_FEATURES = 150000
 vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=500, output_mode='int')
 print("Vectorizing text...")
 vectorizer.adapt(X)
+print("Converting text to vectors...")
+X_vectorized = vectorizer(X)
 
 # Custom F1 score metric for multi-label
 class F1Score(tf.keras.metrics.Metric):
@@ -154,6 +156,10 @@ model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall(), F1Score()]
 )
+
+# Verify X_vectorized
+if 'X_vectorized' not in locals():
+    raise ValueError("X_vectorized is not defined. Ensure vectorization step is executed.")
 
 # Train model with early stopping
 early_stopping = EarlyStopping(monitor='val_f1_score', patience=5, restore_best_weights=True, mode='max')
