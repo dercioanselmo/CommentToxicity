@@ -11,6 +11,7 @@ import string
 from transformers import pipeline
 import logging
 from tqdm import tqdm
+import torch
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, filename='training_errors.log', filemode='a')
@@ -32,13 +33,13 @@ def clean_text(text):
     text = re.sub(r'[^\x20-\x7E]', ' ', text)
     text = re.sub(f'[{string.punctuation}]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    words = text.split()[:300]  # Reduced from 400
+    words = text.split()[:300]
     return ' '.join(words)
 
 # Back-translation augmentation with batch processing
 try:
-    translator_en_to_es = pipeline("translation", model="Helsinki-NLP/opus-mt-en-es", device=0)
-    translator_es_to_en = pipeline("translation", model="Helsinki-NLP/opus-mt-es-en", device=0)
+    translator_en_to_es = pipeline("translation", model="Helsinki-NLP/opus-mt-en-es", device=-1)  # CPU
+    translator_es_to_en = pipeline("translation", model="Helsinki-NLP/opus-mt-es-en", device=-1)  # CPU
 except Exception as e:
     logger.error(f"Failed to initialize translation pipelines: {str(e)}")
     translator_en_to_es = None
@@ -49,13 +50,25 @@ def augment_text_batch(texts):
         logger.warning("Skipping augmentation due to empty input or pipeline failure")
         return texts
     try:
-        es_texts = translator_en_to_es(texts, max_length=600, truncation=True)
+        # Filter valid texts
+        valid_texts = [t for t in texts if isinstance(t, str) and t.strip()]
+        if not valid_texts:
+            logger.warning("No valid texts in batch")
+            return texts
+        es_texts = translator_en_to_es(valid_texts, max_length=600, truncation=True)
         es_texts = [result['translation_text'] for result in es_texts]
         back_translated = translator_es_to_en(es_texts, max_length=600, truncation=True)
-        back_translated = [result['translation_text'] for result in back_translated]
-        return [clean_text(text) for text in back_translated]
+        back_translated = [clean_text(text) if isinstance(text, str) else "" for text in back_translated]
+        # Return original texts for invalid indices
+        result = texts.copy()
+        valid_idx = 0
+        for i, text in enumerate(texts):
+            if isinstance(text, str) and text.strip():
+                result[i] = back_translated[valid_idx]
+                valid_idx += 1
+        return result
     except Exception as e:
-        logger.error(f"Batch translation error for texts: {str([text[:50] for text in texts[:5]])}...: {str(e)}")
+        logger.error(f"Batch translation error for texts: {str([text[:50] for text in texts[:5] if isinstance(text, str)])}...: {str(e)}")
         return texts
 
 # Load and preprocess dataset
@@ -82,6 +95,10 @@ df = pd.concat(oversampled_dfs).sample(frac=1, random_state=42)
 print("Augmented dataset sample:")
 print(df.head())
 
+# Validate dataset
+df = df[df['comment_text'].apply(lambda x: isinstance(x, str) and x.strip())]
+print(f"Dataset size after validation: {len(df)}")
+
 # Prepare data
 X = df['comment_text'].values
 y = df[categories].values
@@ -96,6 +113,9 @@ for i, category in enumerate(categories):
     )
     class_weight_dict[i * 2] = weights[0]
     class_weight_dict[i * 2 + 1] = weights[1] * 2.0 if category in ['severe_toxic', 'identity_hate'] else weights[1] * 1.5
+
+# Clear GPU memory
+torch.cuda.empty_cache()
 
 # Text vectorization
 MAX_FEATURES = 150000
