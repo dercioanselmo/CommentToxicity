@@ -62,7 +62,7 @@ def augment_text_batch(texts):
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
 df = df[df['comment_text'] != ""]  # Remove empty comments
-df = df.head(100)  # Test on small subset
+# df = df.head(100)  # Uncomment for full dataset
 
 # Oversample each toxic label
 non_toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
@@ -70,7 +70,7 @@ categories = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_
 oversampled_dfs = [non_toxic_df]
 for category in categories:
     toxic_df = df[df[category] == 1]
-    oversampled = toxic_df.sample(len(non_toxic_df), replace=True, random_state=42)
+    oversampled = toxic_df.sample(int(1.2 * len(non_toxic_df)), replace=True, random_state=42)
     batch_size = 16
     augmented_texts = []
     print(f"Augmenting {len(oversampled)} comments for category: {category}")
@@ -106,26 +106,33 @@ vectorizer.adapt(X)
 print("Converting text to vectors...")
 X_vectorized = vectorizer(X)
 
-# Custom F1 score metric for multi-label
+# Custom F1 score metric for multi-label (per-label average)
 class F1Score(tf.keras.metrics.Metric):
-    def __init__(self, name='f1_score', **kwargs):
+    def __init__(self, name='f1_score', num_classes=6, **kwargs):
         super().__init__(name=name, **kwargs)
-        self.precision = tf.keras.metrics.Precision()
-        self.recall = tf.keras.metrics.Recall()
+        self.num_classes = num_classes
+        self.precision = [tf.keras.metrics.Precision(name=f'precision_{i}') for i in range(num_classes)]
+        self.recall = [tf.keras.metrics.Recall(name=f'recall_{i}') for i in range(num_classes)]
 
     def update_state(self, y_true, y_pred, sample_weight=None):
-        y_pred = tf.cast(y_pred > 0.4, tf.float32)  # Binarize predictions
-        self.precision.update_state(y_true, y_pred, sample_weight)
-        self.recall.update_state(y_true, y_pred, sample_weight)
+        y_pred = tf.cast(y_pred > 0.35, tf.float32)  # Lower threshold
+        for i in range(self.num_classes):
+            self.precision[i].update_state(y_true[:, i], y_pred[:, i], sample_weight)
+            self.recall[i].update_state(y_true[:, i], y_pred[:, i], sample_weight)
 
     def result(self):
-        p = self.precision.result()
-        r = self.recall.result()
-        return 2 * ((p * r) / (p + r + tf.keras.backend.epsilon()))
+        f1_scores = []
+        for i in range(self.num_classes):
+            p = self.precision[i].result()
+            r = self.recall[i].result()
+            f1 = 2 * ((p * r) / (p + r + tf.keras.backend.epsilon()))
+            f1_scores.append(f1)
+        return tf.reduce_mean(f1_scores)
 
     def reset_state(self):
-        self.precision.reset_state()
-        self.recall.reset_state()
+        for i in range(self.num_classes):
+            self.precision[i].reset_state()
+            self.recall[i].reset_state()
 
 # Custom focal loss
 def focal_loss(gamma=2.0, alpha=0.25):
@@ -153,8 +160,8 @@ model = Sequential([
 # Compile model
 model.compile(
     loss=focal_loss(gamma=2.0, alpha=0.25),
-    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
-    metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall(), F1Score()]
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.00005),
+    metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall(), F1Score(num_classes=len(categories))]
 )
 
 # Verify X_vectorized
@@ -175,7 +182,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v33.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v34.h5'))
 
 # Test sample comments with lower threshold
 sample_comments = [
@@ -187,4 +194,4 @@ for comment in sample_comments:
     sample_vectorized = vectorizer([clean_text(comment)])
     prediction = model.predict(sample_vectorized)
     print(f"Comment: {comment}")
-    print({category: bool(prediction[0][idx] > 0.4) for idx, category in enumerate(categories)})
+    print({category: bool(prediction[0][idx] > 0.35) for idx, category in enumerate(categories)})
