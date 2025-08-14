@@ -32,7 +32,7 @@ def clean_text(text):
     text = re.sub(r'[^\x20-\x7E]', ' ', text)
     text = re.sub(f'[{string.punctuation}]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    words = text.split()[:400]
+    words = text.split()[:300]  # Reduced from 400
     return ' '.join(words)
 
 # Back-translation augmentation with batch processing
@@ -49,9 +49,9 @@ def augment_text_batch(texts):
         logger.warning("Skipping augmentation due to empty input or pipeline failure")
         return texts
     try:
-        es_texts = translator_en_to_es(texts, max_length=512, truncation=True)
+        es_texts = translator_en_to_es(texts, max_length=600, truncation=True)
         es_texts = [result['translation_text'] for result in es_texts]
-        back_translated = translator_es_to_en(es_texts, max_length=512, truncation=True)
+        back_translated = translator_es_to_en(es_texts, max_length=600, truncation=True)
         back_translated = [result['translation_text'] for result in back_translated]
         return [clean_text(text) for text in back_translated]
     except Exception as e:
@@ -62,7 +62,6 @@ def augment_text_batch(texts):
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
 df = df[df['comment_text'] != ""]  # Remove empty comments
-# df = df.head(100)  # Uncomment for full dataset
 
 # Oversample each toxic label
 non_toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
@@ -115,7 +114,7 @@ class F1Score(tf.keras.metrics.Metric):
         self.recall = [tf.keras.metrics.Recall(name=f'recall_{i}') for i in range(num_classes)]
 
     def update_state(self, y_true, y_pred, sample_weight=None):
-        y_pred = tf.cast(y_pred > 0.35, tf.float32)  # Lower threshold
+        y_pred = tf.cast(y_pred > 0.35, tf.float32)
         for i in range(self.num_classes):
             self.precision[i].update_state(y_true[:, i], y_pred[:, i], sample_weight)
             self.recall[i].update_state(y_true[:, i], y_pred[:, i], sample_weight)
@@ -169,7 +168,7 @@ if 'X_vectorized' not in locals():
     raise ValueError("X_vectorized is not defined. Ensure vectorization step is executed.")
 
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_f1_score', patience=5, restore_best_weights=True, mode='max')
+early_stopping = EarlyStopping(monitor='val_f1_score', patience=7, restore_best_weights=True, mode='max')
 print("Starting training...")
 model.fit(
     X_vectorized,
