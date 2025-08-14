@@ -8,6 +8,7 @@ from sklearn.utils import class_weight
 from tensorflow.keras.callbacks import EarlyStopping
 import re
 import string
+from transformers import pipeline
 import logging
 
 # Set up logging
@@ -33,9 +34,26 @@ def clean_text(text):
     words = text.split()[:500]
     return ' '.join(words)
 
-# Temporary no-op augmentation (to be restored later)
+# Back-translation augmentation
+try:
+    translator_en_to_es = pipeline("translation", model="Helsinki-NLP/opus-mt-en-es", device=0)
+    translator_es_to_en = pipeline("translation", model="Helsinki-NLP/opus-mt-es-en", device=0)
+except Exception as e:
+    logger.error(f"Failed to initialize translation pipelines: {str(e)}")
+    translator_en_to_es = None
+    translator_es_to_en = None
+
 def augment_text(text):
-    return text  # Skip augmentation to bypass CUDA errors
+    if not text.strip() or translator_en_to_es is None or translator_es_to_en is None:
+        logger.warning(f"Skipping augmentation for comment '{text[:50]}...' due to empty input or pipeline failure")
+        return text
+    try:
+        es_text = translator_en_to_es(text, max_length=600, truncation=True)[0]['translation_text']
+        back_translated = translator_es_to_en(es_text, max_length=600, truncation=True)[0]['translation_text']
+        return clean_text(back_translated)
+    except Exception as e:
+        logger.error(f"Translation error for comment '{text[:50]}...': {str(e)}")
+        return text
 
 # Load and preprocess dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
