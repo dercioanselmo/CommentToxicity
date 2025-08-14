@@ -68,7 +68,7 @@ vectorizer.adapt(train_df['comment_text'].values)
 X_test_vectorized = vectorizer(X_test)
 model.compile(
     loss=lambda y_true, y_pred: y_true,  # Dummy loss for evaluation
-    metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall(), F1Score()]
+    metrics=['accuracy', tf.keras.metrics.Precision(name='precision'), tf.keras.metrics.Recall(name='recall'), F1Score()]
 )
 metrics = model.evaluate(X_test_vectorized, y_test, return_dict=True)
 print(f"Test Loss: {metrics['loss']:.4f}, Test Accuracy: {metrics['accuracy']:.4f}, "
@@ -85,4 +85,4 @@ for comment in sample_comments:
     sample_vectorized = vectorizer([clean_text(comment)])
     prediction = model.predict(sample_vectorized)
     print(f"Comment: {comment}")
-    print({category: bool(prediction[0][idx] > 0.45) for idx, category in enumerate(categories)})
+    print({category: bool(prediction[0][idx] > 0.4) for idx, category in enumerate(categories)})

@@ -47,4 +47,4 @@ async def predict(comment: Comment):
         return {category: False for category in categories}
     vectorized_comment = vectorizer([cleaned_comment])
     prediction = model.predict(vectorized_comment)
-    return {category: bool(prediction[0][idx] > 0.45) for idx, category in enumerate(categories)}
+    return {category: bool(prediction[0][idx] > 0.4) for idx, category in enumerate(categories)}
