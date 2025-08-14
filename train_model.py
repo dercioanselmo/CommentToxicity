@@ -29,7 +29,7 @@ def clean_text(text):
         logger.warning("Empty or invalid comment skipped in preprocessing")
         return ""
     text = text.lower()
-    text = re.sub(r'[^\x20-\x7E]', ' ', text)  # Remove non-printable characters
+    text = re.sub(r'[^\x20-\x7E]', ' ', text)
     text = re.sub(f'[{string.punctuation}]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
     words = text.split()[:400]
@@ -49,32 +49,28 @@ def augment_text_batch(texts):
         logger.warning("Skipping augmentation due to empty input or pipeline failure")
         return texts
     try:
-        # Translate to Spanish
         es_texts = translator_en_to_es(texts, max_length=512, truncation=True)
         es_texts = [result['translation_text'] for result in es_texts]
-        # Translate back to English
         back_translated = translator_es_to_en(es_texts, max_length=512, truncation=True)
         back_translated = [result['translation_text'] for result in back_translated]
-        # Clean translated texts
         return [clean_text(text) for text in back_translated]
     except Exception as e:
         logger.error(f"Batch translation error for texts: {str([text[:50] for text in texts[:5]])}...: {str(e)}")
-        return texts  # Return original texts if translation fails
+        return texts
 
 # Load and preprocess dataset
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
 df = df[df['comment_text'] != ""]  # Remove empty comments
-df = df.head(100)  # Test on small subset to debug CUDA errors
+df = df.head(100)  # Test on small subset
 
-# Oversample each toxic label (100% of non-toxic samples)
+# Oversample each toxic label
 non_toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
 categories = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
 oversampled_dfs = [non_toxic_df]
 for category in categories:
     toxic_df = df[df[category] == 1]
     oversampled = toxic_df.sample(len(non_toxic_df), replace=True, random_state=42)
-    # Batch process augmentation with progress bar
     batch_size = 16
     augmented_texts = []
     print(f"Augmenting {len(oversampled)} comments for category: {category}")
@@ -91,7 +87,7 @@ print(df.head())
 X = df['comment_text'].values
 y = df[categories].values
 
-# Compute class weights with higher weight for rare labels
+# Compute class weights with adjusted values
 class_weight_dict = {}
 for i, category in enumerate(categories):
     weights = class_weight.compute_class_weight(
@@ -100,7 +96,7 @@ for i, category in enumerate(categories):
         y=y[:, i]
     )
     class_weight_dict[i * 2] = weights[0]
-    class_weight_dict[i * 2 + 1] = weights[1] * 3.0 if category in ['severe_toxic', 'identity_hate'] else weights[1] * 2.5
+    class_weight_dict[i * 2 + 1] = weights[1] * 2.0 if category in ['severe_toxic', 'identity_hate'] else weights[1] * 1.5
 
 # Text vectorization
 MAX_FEATURES = 150000
@@ -108,7 +104,7 @@ vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=5
 print("Vectorizing text...")
 vectorizer.adapt(X)
 
-# Custom F1 score metric
+# Custom F1 score metric for multi-label
 class F1Score(tf.keras.metrics.Metric):
     def __init__(self, name='f1_score', **kwargs):
         super().__init__(name=name, **kwargs)
@@ -116,6 +112,7 @@ class F1Score(tf.keras.metrics.Metric):
         self.recall = tf.keras.metrics.Recall()
 
     def update_state(self, y_true, y_pred, sample_weight=None):
+        y_pred = tf.cast(y_pred > 0.4, tf.float32)  # Binarize predictions
         self.precision.update_state(y_true, y_pred, sample_weight)
         self.recall.update_state(y_true, y_pred, sample_weight)
 
@@ -158,11 +155,8 @@ model.compile(
     metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall(), F1Score()]
 )
 
-# Vectorize input data
-X_vectorized = vectorizer(X)
-
 # Train model with early stopping
-early_stopping = EarlyStopping(monitor='val_f1_score', patience=3, restore_best_weights=True, mode='max')
+early_stopping = EarlyStopping(monitor='val_f1_score', patience=5, restore_best_weights=True, mode='max')
 print("Starting training...")
 model.fit(
     X_vectorized,
