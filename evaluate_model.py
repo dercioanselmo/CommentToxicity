@@ -1,19 +1,23 @@
 import pandas as pd
-import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import TextVectorization
+import numpy as np
 import os
 import re
 import string
 
+# Define base directory
 BASE_DIR = "/home/branch/projects/CommentToxicity"
 
 # Text preprocessing function
 def clean_text(text):
+    if not isinstance(text, str) or not text.strip():
+        return ""
     text = text.lower()
     text = re.sub(f'[{string.punctuation}]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    words = text.split()[:500]
+    return ' '.join(words)
 
 # Custom F1 score metric
 class F1Score(tf.keras.metrics.Metric):
@@ -35,48 +39,43 @@ class F1Score(tf.keras.metrics.Metric):
         self.precision.reset_state()
         self.recall.reset_state()
 
-# Custom focal loss
-def focal_loss(gamma=2.0, alpha=0.25):
-    def focal_loss_fn(y_true, y_pred):
-        y_true = tf.cast(y_true, tf.float32)
-        y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1. - tf.keras.backend.epsilon())
-        cross_entropy = -y_true * tf.math.log(y_pred) - (1 - y_true) * tf.math.log(1 - y_pred)
-        weight = y_true * tf.pow(1 - y_pred, gamma) + (1 - y_true) * tf.pow(y_pred, gamma)
-        return tf.reduce_mean(alpha * weight * cross_entropy)
-    return focal_loss_fn
-
-# Load test data
-test_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/test.csv'))
-test_labels = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/test_labels.csv'))
-test_df = test_df.merge(test_labels, on='id')
-test_df = test_df[test_df['toxic'] != -1]
+# Load test data and labels
+test_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'test.csv'))
+test_labels_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'test_labels.csv'))
+test_df = test_df.merge(test_labels_df, on='id')
+test_df = test_df[test_df['toxic'] != -1]  # Remove unlabeled data
 test_df['comment_text'] = test_df['comment_text'].apply(clean_text)
+test_df = test_df[test_df['comment_text'] != ""]  # Remove empty comments
 
-# Balance test set (50% toxic)
-toxic_test = test_df[test_df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) > 0]
-non_toxic_test = test_df[test_df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
-min_size = min(len(toxic_test), len(non_toxic_test))
-test_df = pd.concat([toxic_test.sample(min_size, random_state=42), non_toxic_test.sample(min_size, random_state=42)]).sample(frac=1, random_state=42)
+# Prepare test data
+X_test = test_df['comment_text'].values
+categories = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
+y_test = test_df[categories].values
 
 # Load model and vectorizer
 model = tf.keras.models.load_model(
     os.path.join(BASE_DIR, 'toxicity_improved_v32.h5'),
-    custom_objects={'focal_loss_fn': focal_loss(gamma=2.0, alpha=0.25), 'F1Score': F1Score}
+    custom_objects={'focal_loss_fn': lambda y_true, y_pred: y_true, 'F1Score': F1Score}
 )
-train_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge/train.csv'))
+train_df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 train_df['comment_text'] = train_df['comment_text'].apply(clean_text)
-vectorizer = TextVectorization(max_tokens=150000, output_sequence_length=500, output_mode='int')
+train_df = train_df[train_df['comment_text'] != ""]
+MAX_FEATURES = 150000
+vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=500, output_mode='int')
 vectorizer.adapt(train_df['comment_text'].values)
 
-# Prepare test data
-X_test = vectorizer(test_df['comment_text'].values)
-y_test = test_df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].values
+# Evaluate model
+X_test_vectorized = vectorizer(X_test)
+model.compile(
+    loss=lambda y_true, y_pred: y_true,  # Dummy loss for evaluation
+    metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall(), F1Score()]
+)
+metrics = model.evaluate(X_test_vectorized, y_test, return_dict=True)
+print(f"Test Loss: {metrics['loss']:.4f}, Test Accuracy: {metrics['accuracy']:.4f}, "
+      f"Test Precision: {metrics['precision']:.4f}, Test Recall: {metrics['recall']:.4f}, "
+      f"Test F1 Score: {metrics['f1_score']:.4f}")
 
-# Evaluate
-loss, accuracy, precision, recall, f1_score = model.evaluate(X_test, y_test)
-print(f'Test Loss: {loss}, Test Accuracy: {accuracy}, Test Precision: {precision}, Test Recall: {recall}, Test F1 Score: {f1_score}')
-
-# Test specific comments with lower threshold
+# Test sample comments
 sample_comments = [
     'You’re an idiot who doesn’t know anything.',
     'This is a great article, thanks for sharing!',
@@ -86,4 +85,4 @@ for comment in sample_comments:
     sample_vectorized = vectorizer([clean_text(comment)])
     prediction = model.predict(sample_vectorized)
     print(f"Comment: {comment}")
-    print({category: bool(prediction[0][idx] > 0.45) for idx, category in enumerate(['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate'])})
+    print({category: bool(prediction[0][idx] > 0.45) for idx, category in enumerate(categories)})
