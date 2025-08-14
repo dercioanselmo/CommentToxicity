@@ -12,7 +12,7 @@ from transformers import pipeline
 import logging
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, filename='training_errors.log', filemode='w')
+logging.basicConfig(level=logging.INFO, filename='training_errors.log', filemode='a')
 logger = logging.getLogger(__name__)
 
 # Set random seed for reproducibility
@@ -22,16 +22,18 @@ np.random.seed(42)
 # Define base directory
 BASE_DIR = "/home/branch/projects/CommentToxicity"
 
-# Text preprocessing function
+# Enhanced text preprocessing
 def clean_text(text):
     if not isinstance(text, str) or not text.strip():
         logger.warning("Empty or invalid comment skipped in preprocessing")
         return ""
     text = text.lower()
+    # Remove non-printable characters and excessive whitespace
+    text = re.sub(r'[^\x20-\x7E]', ' ', text)
     text = re.sub(f'[{string.punctuation}]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    # Truncate to 500 tokens (approximated by words)
-    words = text.split()[:500]
+    # Truncate to 400 tokens (words, conservative for translation models)
+    words = text.split()[:400]
     return ' '.join(words)
 
 # Back-translation augmentation
@@ -44,12 +46,12 @@ except Exception as e:
     translator_es_to_en = None
 
 def augment_text(text):
-    if not text.strip() or translator_en_to_es is None or translator_es_to_en is None:
-        logger.warning(f"Skipping augmentation for comment '{text[:50]}...' due to empty input or pipeline failure")
+    if not text.strip() or len(text.split()) > 400 or translator_en_to_es is None or translator_es_to_en is None:
+        logger.warning(f"Skipping augmentation for comment '{text[:50]}...' due to empty input, length, or pipeline failure")
         return text
     try:
-        es_text = translator_en_to_es(text, max_length=600, truncation=True)[0]['translation_text']
-        back_translated = translator_es_to_en(es_text, max_length=600, truncation=True)[0]['translation_text']
+        es_text = translator_en_to_es(text, max_length=512, truncation=True)[0]['translation_text']
+        back_translated = translator_es_to_en(es_text, max_length=512, truncation=True)[0]['translation_text']
         return clean_text(back_translated)
     except Exception as e:
         logger.error(f"Translation error for comment '{text[:50]}...': {str(e)}")
@@ -59,14 +61,15 @@ def augment_text(text):
 df = pd.read_csv(os.path.join(BASE_DIR, 'jigsaw-toxic-comment-classification-challenge', 'train.csv'))
 df['comment_text'] = df['comment_text'].apply(clean_text)
 df = df[df['comment_text'] != ""]  # Remove empty comments
+df = df.head(100)  # Test on small subset to debug CUDA errors
 
-# Oversample each toxic label separately (90% of non-toxic samples)
+# Oversample each toxic label (100% of non-toxic samples for balance)
 non_toxic_df = df[df[['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']].sum(axis=1) == 0]
 categories = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
 oversampled_dfs = [non_toxic_df]
 for category in categories:
     toxic_df = df[df[category] == 1]
-    oversampled = toxic_df.sample(int(0.9 * len(non_toxic_df)), replace=True, random_state=42)
+    oversampled = toxic_df.sample(len(non_toxic_df), replace=True, random_state=42)
     oversampled['comment_text'] = oversampled['comment_text'].apply(augment_text)
     oversampled_dfs.append(oversampled)
 df = pd.concat(oversampled_dfs).sample(frac=1, random_state=42)
@@ -76,7 +79,7 @@ print(df.head())
 X = df['comment_text'].values
 y = df[categories].values
 
-# Compute class weights for each label
+# Compute class weights with higher weight for rare labels
 class_weight_dict = {}
 for i, category in enumerate(categories):
     weights = class_weight.compute_class_weight(
@@ -84,8 +87,8 @@ for i, category in enumerate(categories):
         classes=np.array([0, 1]),
         y=y[:, i]
     )
-    class_weight_dict[i * 2] = weights[0]  # Negative class (0)
-    class_weight_dict[i * 2 + 1] = weights[1] * 2.5  # Positive class (1)
+    class_weight_dict[i * 2] = weights[0]
+    class_weight_dict[i * 2 + 1] = weights[1] * 3.0 if category in ['severe_toxic', 'identity_hate'] else weights[1] * 2.5
 
 # Text vectorization
 MAX_FEATURES = 150000
@@ -158,7 +161,7 @@ model.fit(
 )
 
 # Save model
-model.save(os.path.join(BASE_DIR, 'toxicity_improved_v32.h5'))
+model.save(os.path.join(BASE_DIR, 'toxicity_improved_v33.h5'))
 
 # Test sample comments with lower threshold
 sample_comments = [
@@ -170,4 +173,4 @@ for comment in sample_comments:
     sample_vectorized = vectorizer([clean_text(comment)])
     prediction = model.predict(sample_vectorized)
     print(f"Comment: {comment}")
-    print({category: bool(prediction[0][idx] > 0.45) for idx, category in enumerate(categories)})
+    print({category: bool(prediction[0][idx] > 0.4) for idx, category in enumerate(categories)})
