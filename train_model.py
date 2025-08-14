@@ -10,6 +10,7 @@ import re
 import string
 from transformers import pipeline
 import logging
+from tqdm import tqdm
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, filename='training_errors.log', filemode='a')
@@ -73,15 +74,17 @@ oversampled_dfs = [non_toxic_df]
 for category in categories:
     toxic_df = df[df[category] == 1]
     oversampled = toxic_df.sample(len(non_toxic_df), replace=True, random_state=42)
-    # Batch process augmentation
+    # Batch process augmentation with progress bar
     batch_size = 16
     augmented_texts = []
-    for i in range(0, len(oversampled), batch_size):
+    print(f"Augmenting {len(oversampled)} comments for category: {category}")
+    for i in tqdm(range(0, len(oversampled), batch_size), desc=f"Augmenting {category}"):
         batch = oversampled['comment_text'].iloc[i:i + batch_size].tolist()
         augmented_texts.extend(augment_text_batch(batch))
     oversampled['comment_text'] = augmented_texts
     oversampled_dfs.append(oversampled)
 df = pd.concat(oversampled_dfs).sample(frac=1, random_state=42)
+print("Augmented dataset sample:")
 print(df.head())
 
 # Prepare data
@@ -102,6 +105,7 @@ for i, category in enumerate(categories):
 # Text vectorization
 MAX_FEATURES = 150000
 vectorizer = TextVectorization(max_tokens=MAX_FEATURES, output_sequence_length=500, output_mode='int')
+print("Vectorizing text...")
 vectorizer.adapt(X)
 
 # Custom F1 score metric
@@ -159,6 +163,7 @@ X_vectorized = vectorizer(X)
 
 # Train model with early stopping
 early_stopping = EarlyStopping(monitor='val_f1_score', patience=3, restore_best_weights=True, mode='max')
+print("Starting training...")
 model.fit(
     X_vectorized,
     y,
